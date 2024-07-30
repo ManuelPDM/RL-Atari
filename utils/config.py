@@ -16,6 +16,7 @@ class Config:
         self.max_steps_per_episode = 200
         self.save_interval = 100
         self.buffer_size = 10000
+        self.update_interval = 50
 
         # Evaluation settings
         self.evaluate_every = 100
@@ -26,6 +27,9 @@ class Config:
 
         # Reproducibility
         self.seed = 0
+
+        #Neural network
+        self.NN_width=256
 
 def load_config():
     return Config()
