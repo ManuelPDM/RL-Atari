@@ -18,15 +18,15 @@ class Neural_Network(nn.Module):
 
 
 class DDQNAgent:
-    def __init__(self, state_size, action_size, buffer_size, epsilon, epsilon_decay, learning_rate, NN_width,
-                 epsilon_min):
+    def __init__(self, state_size, action_size, buffer_size, learning_rate, NN_width,
+                 gamma, batch_size):
         self.state_size = state_size
         self.action_size = action_size
         self.buffer = deque(maxlen=buffer_size)
         self.buffer_size = buffer_size
-        self.epsilon = epsilon
-        self.epsilon_decay = epsilon_decay
-        self.epsilon_min = epsilon_min
+        self.batch_size = batch_size
+
+        self.gamma = gamma
         self.learning_rate = learning_rate
 
         if torch.cuda.is_available():
@@ -34,17 +34,18 @@ class DDQNAgent:
         else:
             self.device = "cpu"
 
-        self.network = Neural_Network(action_size, state_size, NN_width)
-        self.target_network = Neural_Network(action_size, state_size, NN_width)
+        self.network = Neural_Network(action_size, state_size, NN_width).to(self.device)
+        self.target_network = Neural_Network(action_size, state_size, NN_width).to(self.device)
 
         self.loss = nn.MSELoss()
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=self.learning_rate)
 
-    def get_action(self, state):
-        if np.random.rand() < self.epsilon:
+    def get_action(self, state, epsilon):
+        if np.random.rand() < epsilon:
             return np.random.choice(self.action_size)
         else:
             with torch.no_grad():
+                state = torch.from_numpy(state).float().to(self.device) / 255.0
                 q_values = self.network(state)
                 best_action = torch.argmax(q_values).item()
                 return best_action
@@ -53,12 +54,45 @@ class DDQNAgent:
         self.buffer.append((state, action, reward, state_prime, terminal))
 
     def update_network(self):
+
         samples = self.sample_buffer()
-        states, actions, rewards, states_primes, terminals = zip(*samples)
+        if len(samples) < 2:
+            return
+        states_init, actions_init, rewards_init, states_primes_init, terminals_init = zip(*samples)
+
+        states = np.stack(states_init, axis=0)
+        states = torch.from_numpy(states).float().to(self.device) / 255.0
+
+        states_primes = np.stack(states_primes_init, axis=0)
+        states_primes = torch.from_numpy(states_primes).float().to(self.device) / 255.0
+
+        actions = torch.tensor(actions_init).unsqueeze(1).to(self.device)
+        rewards = torch.tensor(rewards_init).unsqueeze(1).to(self.device)
+        terminals = torch.tensor(terminals_init, dtype=torch.float32).unsqueeze(1).to(self.device)
+
+        q_max, _ = torch.max(self.target_network(states_primes), dim=1)
+        q_max_target_network = q_max.unsqueeze(1).to(self.device)
+
+        td = rewards + self.gamma * q_max_target_network * (1 - terminals)
+
+        q_of_actions_taken = self.network(states).gather(1, actions)
+        error = self.loss(q_of_actions_taken, td)
+        self.optimizer.zero_grad()
+        error.backward()
+        torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1)
+        self.optimizer.step()
 
     def update_target_network(self):
         self.target_network.load_state_dict(self.network.state_dict())
 
     def sample_buffer(self):
-        max_size = min(len(self.buffer), self.buffer_size)
+        max_size = min(len(self.buffer), self.batch_size)
         return random.sample(self.buffer, max_size)
+
+    def save_model(self):
+        torch.save(self.network.state_dict(), 'models/DDQN_model.pt')
+    def load_model(self, model_name=None):
+        if model_name is None:
+            raise ValueError("Model name cannot be None")
+        self.network.load_state_dict(torch.load(f'models/{model_name}.pt'))
+
