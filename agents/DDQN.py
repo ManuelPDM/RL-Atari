@@ -70,12 +70,12 @@ class DDQNAgent:
         rewards = torch.tensor(rewards_init).unsqueeze(1).to(self.device)
         terminals = torch.tensor(terminals_init, dtype=torch.float32).unsqueeze(1).to(self.device)
 
-        q_max, _ = torch.max(self.target_network(states_primes), dim=1)
-        q_max_target_network = q_max.unsqueeze(1).to(self.device)
+        q_max, _ = torch.max(self.network(states_primes), dim=1)
+        q_max_ = q_max.unsqueeze(1).to(self.device)
 
-        td = rewards + self.gamma * q_max_target_network * (1 - terminals)
+        td = rewards + self.gamma * q_max * (1 - terminals)
 
-        q_of_actions_taken = self.network(states).gather(1, actions)
+        q_of_actions_taken = self.target_network(states).gather(1, actions)
         error = self.loss(q_of_actions_taken, td)
         self.optimizer.zero_grad()
         error.backward()
